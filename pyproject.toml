@@ -1,0 +1,10 @@
+[project]
+name = "telegram-archive-bot"
+version = "2.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "pyrogram",
+    "tgcrypto",
+    "python-dotenv",
+    "sqlalchemy"
+]
