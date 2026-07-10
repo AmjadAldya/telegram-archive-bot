@@ -140,17 +140,20 @@ Send these commands to your control bot (see above), or from the userbot's
 own Saved Messages ("me") if you didn't set `BOT_TOKEN` - either way they
 never post visibly in the source/destination chats themselves:
 
-1. `/chats` - lists the groups/channels you're a member of, with a number
-   next to each one. Long lists are paginated (`/chats 2`, `/chats 3`, ...).
-2. `/setsource <number>` - picks the source (the protected group/channel to
-   read from) using the number from `/chats`.
-3. `/setdest <number>` - picks the destination the same way.
+1. `/setsource` - shows a tappable list of every group/channel you're a
+   member of. Tap one to pick it as the source (the protected chat to read
+   from). Long lists get `◀ Prev` / `Next ▶` buttons.
+2. `/setdest` - same idea, but only lists groups/channels where you're the
+   **owner or an admin** - the only chats media can actually be copied into.
 
-You can also skip straight to `/setsource -1001234567890` or
-`/setsource @some_channel` if you already know the chat. As soon as both are
-set, the backlog sync starts automatically. Run `/setsource`/`/setdest`
-again any time to repoint the mirror - the old backlog scan is cancelled and
-a new one starts for the new pair.
+Both fall back to `/chats` (a plain numbered list) plus typing
+`/setsource <number>` / `/setsource -1001234567890` / `/setsource @username`
+if you'd rather not tap through buttons, or need a chat that isn't showing
+up. `/setdest` still enforces the owner/admin check either way.
+
+As soon as both are set, the backlog sync starts automatically. Run
+`/setsource`/`/setdest` again any time to repoint the mirror - the old
+backlog scan is cancelled and a new one starts for the new pair.
 
 If you'd rather configure it non-interactively (e.g. for a scripted first
 deploy), you can still set `SOURCE_CHAT_ID`/`DEST_CHAT_ID` in `.env`; they're
@@ -177,9 +180,11 @@ source of truth and the env vars are ignored.
 Sent to your control bot (or from the userbot's own Saved Messages if you
 didn't set `BOT_TOKEN`):
 
-- `/chats [page]` - list your groups/channels to pick from.
-- `/setsource <number|id|@username>` - set the chat to mirror media from.
-- `/setdest <number|id|@username>` - set the chat to mirror media into.
+- `/chats [page]` - list your groups/channels as plain text, with numbers.
+- `/setsource [number|id|@username]` - tap a chat from the list to mirror
+  media from; or pass a number/id/@username directly.
+- `/setdest [number|id|@username]` - same, but only offers chats where
+  you're the owner or an admin (required to be able to post into them).
 - `/status` - shows the configured pair, backlog progress, pause state.
 - `/pause` - stops transferring media until `/resume`.
 - `/resume` - resumes transferring media.
