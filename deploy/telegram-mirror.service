@@ -1,0 +1,28 @@
+# Example systemd unit for running the mirror without Docker, e.g. on a VPS.
+#
+# Adjust WorkingDirectory/ExecStart to your actual install path and Python
+# interpreter (a virtualenv's python, typically), then:
+#
+#   sudo cp deploy/telegram-mirror.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now telegram-mirror
+#   journalctl -u telegram-mirror -f   # tail logs
+#
+# Restart=always plus WantedBy=multi-user.target means it comes back after a
+# crash and after the machine reboots.
+
+[Unit]
+Description=Telegram Media Mirror Userbot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/telegram-archive-bot
+EnvironmentFile=/opt/telegram-archive-bot/.env
+ExecStart=/opt/telegram-archive-bot/.venv/bin/python -m app.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

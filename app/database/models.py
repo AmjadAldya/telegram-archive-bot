@@ -18,6 +18,32 @@ class SyncStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+MIRROR_CONFIG_ID = "default"
+
+
+class MirrorConfig(Base):
+    """Singleton row holding the currently selected source/destination chats.
+
+    Chosen interactively via /chats + /setsource + /setdest (see
+    app/mirror/runtime.py), so the choice survives restarts without editing
+    `.env`.
+    """
+
+    __tablename__ = "mirror_config"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True, default=lambda: MIRROR_CONFIG_ID)
+    source_chat_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    dest_chat_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    dest_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class TransferredMedia(Base):
     """Dedup ledger: one row per media file ever sent to a destination chat.
 

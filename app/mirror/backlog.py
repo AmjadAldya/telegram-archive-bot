@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-from app.config.settings import DEST_CHAT_ID, SOURCE_CHAT_ID
 from app.database.base import session_scope
 from app.database.models import SyncStatus
 from app.database.repositories import MirrorRepository
@@ -12,10 +11,10 @@ from app.mirror.transfer import transfer_message
 from app.services.logger import logger
 
 
-def _get_or_create_state() -> tuple[str, int | None, str]:
+def _get_or_create_state(source_chat_id: str, dest_chat_id: str) -> tuple[str, int | None, str]:
     with session_scope() as session:
         repository = MirrorRepository(session)
-        state = repository.get_or_create_sync_state(str(SOURCE_CHAT_ID), str(DEST_CHAT_ID))
+        state = repository.get_or_create_sync_state(source_chat_id, dest_chat_id)
         return state.id, state.resume_before_message_id, state.status.value
 
 
@@ -43,21 +42,26 @@ def _update_progress(
         )
 
 
-def _reset_state() -> None:
+def _reset_state(source_chat_id: str, dest_chat_id: str) -> None:
     with session_scope() as session:
         repository = MirrorRepository(session)
-        repository.reset_sync_state(str(SOURCE_CHAT_ID), str(DEST_CHAT_ID))
+        repository.reset_sync_state(source_chat_id, dest_chat_id)
 
 
-def _state_summary() -> str:
+def _state_summary(source_chat_id: str, dest_chat_id: str) -> str:
     with session_scope() as session:
         repository = MirrorRepository(session)
-        state = repository.get_or_create_sync_state(str(SOURCE_CHAT_ID), str(DEST_CHAT_ID))
+        state = repository.get_or_create_sync_state(source_chat_id, dest_chat_id)
         return state.summary()
 
 
 async def get_status_summary() -> str:
-    return await asyncio.to_thread(_state_summary)
+    from app.mirror import runtime
+
+    pair = runtime.current()
+    if pair is None:
+        return "Not configured yet - send /chats, then /setsource and /setdest."
+    return await asyncio.to_thread(_state_summary, str(pair.source_chat_id), str(pair.dest_chat_id))
 
 
 async def sync_backlog(client) -> None:
@@ -68,27 +72,38 @@ async def sync_backlog(client) -> None:
     everything. Safe to re-run at any point: the dedup ledger makes replays
     a no-op, they just cost an extra duplicate-check per message.
     """
-    state_id, resume_before, status = await asyncio.to_thread(_get_or_create_state)
+    from app.mirror import runtime
+
+    pair = runtime.current()
+    if pair is None:
+        return
+
+    source_chat_id = str(pair.source_chat_id)
+    dest_chat_id = str(pair.dest_chat_id)
+
+    state_id, resume_before, status = await asyncio.to_thread(
+        _get_or_create_state, source_chat_id, dest_chat_id
+    )
     if status == SyncStatus.COMPLETED.value:
-        logger.info("Backlog sync already completed for %s -> %s", SOURCE_CHAT_ID, DEST_CHAT_ID)
+        logger.info("Backlog sync already completed for %s -> %s", source_chat_id, dest_chat_id)
         return
 
     await asyncio.to_thread(_mark_status, state_id, SyncStatus.RUNNING)
     logger.info(
         "Backlog sync starting for %s -> %s (resume_before=%s)",
-        SOURCE_CHAT_ID,
-        DEST_CHAT_ID,
+        source_chat_id,
+        dest_chat_id,
         resume_before,
     )
 
     offset_id = resume_before or 0
     try:
-        async for message in client.get_chat_history(SOURCE_CHAT_ID, offset_id=offset_id):
+        async for message in client.get_chat_history(pair.source_chat_id, offset_id=offset_id):
             await control.wait_if_paused()
             if control.is_restricted():
                 break
 
-            result = await transfer_message(client, message, DEST_CHAT_ID)
+            result = await transfer_message(client, message, pair.dest_chat_id)
             await asyncio.to_thread(
                 _update_progress,
                 state_id,
@@ -103,7 +118,7 @@ async def sync_backlog(client) -> None:
             )
         else:
             await asyncio.to_thread(_mark_status, state_id, SyncStatus.COMPLETED)
-            logger.info("Backlog sync completed for %s -> %s", SOURCE_CHAT_ID, DEST_CHAT_ID)
+            logger.info("Backlog sync completed for %s -> %s", source_chat_id, dest_chat_id)
     except AccountRestrictedError as exc:
         await asyncio.to_thread(_mark_status, state_id, SyncStatus.FAILED, str(exc))
         logger.critical("Backlog sync stopped: account restricted (%s)", exc)
@@ -112,10 +127,16 @@ async def sync_backlog(client) -> None:
         raise
     except Exception as exc:
         await asyncio.to_thread(_mark_status, state_id, SyncStatus.FAILED, str(exc))
-        logger.exception("Backlog sync failed for %s -> %s", SOURCE_CHAT_ID, DEST_CHAT_ID)
+        logger.exception("Backlog sync failed for %s -> %s", source_chat_id, dest_chat_id)
 
 
 async def reset_backlog(client) -> None:
     """Reset the resume cursor and relaunch a full backlog rescan."""
-    await asyncio.to_thread(_reset_state)
-    asyncio.create_task(sync_backlog(client))
+    from app.mirror import runtime
+
+    pair = runtime.current()
+    if pair is None:
+        return
+
+    await asyncio.to_thread(_reset_state, str(pair.source_chat_id), str(pair.dest_chat_id))
+    await runtime.ensure_backlog_running(client, sync_history=True, force=True)

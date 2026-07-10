@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -27,9 +28,10 @@ def reset_database() -> None:
     from alembic import command
 
     from app.database.base import Base, build_alembic_config, get_engine
-    from app.mirror import control
+    from app.mirror import control, runtime
 
     control.resume()
+    asyncio.run(runtime.reset())
 
     engine = get_engine()
     Base.metadata.drop_all(bind=engine)

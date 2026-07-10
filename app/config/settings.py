@@ -18,8 +18,8 @@ class AppSettings:
     api_hash: str
     session_string: str
     database_url: str
-    source_chat: str | int
-    dest_chat: str | int
+    source_chat: str | int | None
+    dest_chat: str | int | None
     log_level: str
     data_dir: Path
     min_delay_seconds: float
@@ -39,10 +39,13 @@ def _parse_required_int(value: str | None, name: str) -> int:
         raise RuntimeError(f"Environment variable {name} must be an integer") from exc
 
 
-def _parse_chat_reference(value: str, name: str) -> str | int:
+def _parse_optional_chat_reference(value: str | None) -> str | int | None:
+    """SOURCE_CHAT_ID/DEST_CHAT_ID are optional: they only seed the mirror
+    config once, the first time it runs. After that, /setsource and
+    /setdest (backed by the database) are the source of truth."""
+    if value is None or value.strip() == "":
+        return None
     stripped = value.strip()
-    if not stripped:
-        raise RuntimeError(f"Missing required environment variable: {name}")
     if stripped.lstrip("-").isdigit():
         return int(stripped)
     return stripped
@@ -99,8 +102,8 @@ def load_settings() -> AppSettings:
     assert api_hash is not None
     assert session_string is not None
 
-    source_chat = _parse_chat_reference(os.getenv("SOURCE_CHAT_ID", ""), "SOURCE_CHAT_ID")
-    dest_chat = _parse_chat_reference(os.getenv("DEST_CHAT_ID", ""), "DEST_CHAT_ID")
+    source_chat = _parse_optional_chat_reference(os.getenv("SOURCE_CHAT_ID"))
+    dest_chat = _parse_optional_chat_reference(os.getenv("DEST_CHAT_ID"))
 
     log_level = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
     database_url = os.getenv("DATABASE_URL", "sqlite:///./data/telegram_mirror.db")

@@ -6,7 +6,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.database.models import SyncState, SyncStatus, TransferredMedia
+from app.database.models import (
+    MIRROR_CONFIG_ID,
+    MirrorConfig,
+    SyncState,
+    SyncStatus,
+    TransferredMedia,
+)
 
 
 class MirrorRepository:
@@ -120,3 +126,34 @@ class MirrorRepository:
         self.session.flush()
         self.session.refresh(state)
         return state
+
+    # -- mirror config (selected source/destination) ------------------------
+
+    def get_config(self) -> MirrorConfig:
+        config = self.session.get(MirrorConfig, MIRROR_CONFIG_ID)
+        if config is not None:
+            return config
+
+        config = MirrorConfig(id=MIRROR_CONFIG_ID)
+        self.session.add(config)
+        self.session.flush()
+        self.session.refresh(config)
+        return config
+
+    def set_source(self, chat_id: str, title: str) -> MirrorConfig:
+        config = self.get_config()
+        config.source_chat_id = chat_id
+        config.source_title = title
+        config.updated_at = datetime.now(timezone.utc)
+        self.session.flush()
+        self.session.refresh(config)
+        return config
+
+    def set_dest(self, chat_id: str, title: str) -> MirrorConfig:
+        config = self.get_config()
+        config.dest_chat_id = chat_id
+        config.dest_title = title
+        config.updated_at = datetime.now(timezone.utc)
+        self.session.flush()
+        self.session.refresh(config)
+        return config
