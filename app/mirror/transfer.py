@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Literal
 
 from app.database.base import session_scope
@@ -12,9 +13,6 @@ from app.services.logger import logger
 
 TransferResult = Literal["transferred", "duplicate", "skipped"]
 
-# Serializes every outgoing copy_message call across the live listener and the
-# backlog scanner so only one transfer is ever in flight at a time, which is
-# the core defense against tripping Telegram's flood limits.
 _send_lock = asyncio.Lock()
 
 
@@ -31,13 +29,6 @@ def _record_transfer(**kwargs: object) -> bool:
 
 
 async def transfer_message(client, message, dest_chat_id: str | int) -> TransferResult:
-    """Copy a message's media to the destination chat if it hasn't been sent before.
-
-    Non-media messages and disallowed media types are skipped. Duplicate media
-    (same Telegram file, already sent to this destination) is skipped without
-    touching the network. Everything else goes through a rate-limited,
-    flood-wait-aware, single-file-at-a-time send.
-    """
     if control.is_restricted():
         return "skipped"
 
@@ -64,9 +55,8 @@ async def transfer_message(client, message, dest_chat_id: str | int) -> Transfer
         if await asyncio.to_thread(_is_duplicate, dest_chat_key, media_info.file_unique_id):
             return "duplicate"
 
-await rate_limiter.wait()
+        await rate_limiter.wait()
         try:
-            # 1. تنزيل الوسائط إلى السيرفر المحلي
             downloaded_file = await call_with_flood_wait(
                 client.download_media,
                 message=message
@@ -74,7 +64,6 @@ await rate_limiter.wait()
             
             copied = None
             if downloaded_file:
-                # 2. إعادة الرفع بناءً على نوع الملف
                 if media_info.media_type == "photo":
                     copied = await call_with_flood_wait(
                         client.send_photo,
@@ -88,14 +77,13 @@ await rate_limiter.wait()
                         video=downloaded_file
                     )
                 
-                # 3. حذف الملف المؤقت
-                import os
                 if os.path.exists(downloaded_file):
                     os.remove(downloaded_file)
                     
         except AccountRestrictedError as exc:
             control.mark_restricted(str(exc))
             raise
+
         recorded = await asyncio.to_thread(
             _record_transfer,
             file_unique_id=media_info.file_unique_id,
