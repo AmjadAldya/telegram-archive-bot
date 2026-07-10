@@ -225,6 +225,14 @@ server and run it, or save it and run `bash manual_deploy.sh`. This is the
 same thing the GitHub Actions workflow below does automatically - use this
 script for the first deploy, or any time you'd rather trigger it by hand.
 
+Don't remember where a previous deployment lives on the server?
+[deploy/find_and_redeploy.sh](deploy/find_and_redeploy.sh) looks for a
+running/stopped container that matches this project, reads its Docker
+Compose project directory straight from the container so you don't need to
+know the path, stops it, then does the same pull/build/migrate/start steps
+as `manual_deploy.sh`. Falls back to searching common directories, then to
+asking for the path manually, if nothing matches.
+
 ### Automated deploy via GitHub Actions (manual trigger)
 
 `.github/workflows/deploy.yml` lets you redeploy `main` to the droplet by
