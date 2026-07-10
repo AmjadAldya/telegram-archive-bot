@@ -32,7 +32,9 @@ connection to Telegram, not something running inside the app on your device.
 - Media-only: text, stickers, polls, contacts, locations, and link previews
   are ignored; the set of mirrored media types is configurable.
 - Owner-only control commands (`/chats`, `/setsource`, `/setdest`, `/status`,
-  `/pause`, `/resume`, `/resync`) usable only by the logged-in account itself.
+  `/pause`, `/resume`, `/resync`) usable only by the account owner - either
+  through a dedicated control bot with a proper "/" command menu (recommended,
+  set `BOT_TOKEN`), or from the userbot's own Saved Messages if you skip that.
 - Alembic-managed SQLite schema for the mirror config, dedup ledger, and sync
   progress.
 - Docker/Compose deployment (with `restart: unless-stopped`) and CI checks
@@ -41,21 +43,25 @@ connection to Telegram, not something running inside the app on your device.
 ## How it works
 
 1. [app/bot/client.py](app/bot/client.py) logs in with a pre-generated
-   session string and starts the Pyrogram client.
-2. [app/mirror/runtime.py](app/mirror/runtime.py) holds the currently
+   session string and starts the Pyrogram client (the "userbot"), plus a
+   second bot-token client for the control panel if `BOT_TOKEN` is set.
+2. [app/bot/handlers.py](app/bot/handlers.py) registers the control commands
+   on whichever client is the control panel (the dedicated bot, or the
+   userbot itself), restricted to the account owner's user ID, and always
+   registers the live media listener on the userbot.
+3. [app/mirror/runtime.py](app/mirror/runtime.py) holds the currently
    configured source/destination pair (loaded from the database) and
    (re)starts the backlog scan whenever it's set or changed.
-3. [app/mirror/backlog.py](app/mirror/backlog.py) scans the source chat's
+4. [app/mirror/backlog.py](app/mirror/backlog.py) scans the source chat's
    history once (resumable), transferring any media not already recorded.
-4. [app/bot/handlers.py](app/bot/handlers.py) registers a live handler that
-   fires on every new media message; [app/mirror/listener.py](app/mirror/listener.py)
-   checks it against the currently configured source chat.
-5. [app/mirror/transfer.py](app/mirror/transfer.py) is the single choke point
+5. [app/mirror/listener.py](app/mirror/listener.py) checks every incoming
+   media message against the currently configured source chat.
+6. [app/mirror/transfer.py](app/mirror/transfer.py) is the single choke point
    for every transfer: it checks the dedup ledger, waits for the rate
    limiter, serializes the actual send behind a lock, retries on
    `FloodWait`, and records the result - used by both the live handler and
    the backlog scan.
-6. [app/mirror/media.py](app/mirror/media.py) decides whether a message
+7. [app/mirror/media.py](app/mirror/media.py) decides whether a message
    carries mirror-worthy media and extracts its stable file identifier.
 
 Media is moved with `copy_message`, which Telegram handles server-side (no
@@ -84,10 +90,30 @@ your two-step-verification password if you have one. Copy the printed
 `SESSION_STRING` into your `.env`. Treat it like a password - anyone with it
 can act as your account.
 
+## Controlling the mirror from a real bot (recommended)
+
+By default, control commands (`/chats`, `/setsource`, etc.) go through the
+userbot's own Saved Messages - simple, but it mixes bot replies into your
+personal notes. For a cleaner, more professional setup, create a real
+Telegram bot to act as a dedicated control panel:
+
+1. Message [@BotFather](https://t.me/BotFather) on Telegram, send `/newbot`,
+   and follow the prompts (any name/username you like).
+2. Copy the token it gives you into `.env` as `BOT_TOKEN=123456:...`.
+3. Start (or restart) the mirror. It automatically registers a proper "/"
+   command menu on that bot - tap the menu button in the chat with your new
+   bot and every command shows up with a description, like any other bot.
+
+Only the Telegram account behind `SESSION_STRING` can use these commands,
+no matter who else finds or messages the bot - every handler is filtered to
+that one user ID. Leave `BOT_TOKEN` unset to keep using Saved Messages
+instead; nothing else changes.
+
 ## Local setup
 
 1. Copy `.env.example` to `.env` and fill in `API_ID`, `API_HASH`, and
-   `SESSION_STRING`. `SOURCE_CHAT_ID`/`DEST_CHAT_ID` are optional - see below.
+   `SESSION_STRING`. `BOT_TOKEN`, `SOURCE_CHAT_ID`, and `DEST_CHAT_ID` are
+   optional - see above and below.
 2. Install dependencies:
 
 ```bash
@@ -110,8 +136,9 @@ python -m app.main
 
 ## Picking the source and destination
 
-Send these commands as the logged-in account - the simplest way is from
-Saved Messages ("me"), so they don't post visibly in any group:
+Send these commands to your control bot (see above), or from the userbot's
+own Saved Messages ("me") if you didn't set `BOT_TOKEN` - either way they
+never post visibly in the source/destination chats themselves:
 
 1. `/chats` - lists the groups/channels you're a member of, with a number
    next to each one. Long lists are paginated (`/chats 2`, `/chats 3`, ...).
@@ -137,6 +164,7 @@ source of truth and the env vars are ignored.
 | --- | --- | --- |
 | `API_ID`, `API_HASH` | yes | Telegram app credentials |
 | `SESSION_STRING` | yes | User session from `scripts/generate_session.py` |
+| `BOT_TOKEN` | no | From @BotFather; gives control commands their own chat + "/" menu instead of Saved Messages |
 | `SOURCE_CHAT_ID` / `DEST_CHAT_ID` | no | One-time seed only; prefer `/chats` + `/setsource` + `/setdest` |
 | `MIN_DELAY_SECONDS` / `MAX_DELAY_SECONDS` | no | Randomized delay before each transfer (default `3`-`7`) |
 | `FLOOD_WAIT_MAX_RETRIES` | no | Max automatic retries on `FloodWait` before giving up on a message (default `5`) |
@@ -146,8 +174,8 @@ source of truth and the env vars are ignored.
 
 ## Commands
 
-Sent as the logged-in account, ideally from Saved Messages ("me") to avoid
-noise in the source/destination chats:
+Sent to your control bot (or from the userbot's own Saved Messages if you
+didn't set `BOT_TOKEN`):
 
 - `/chats [page]` - list your groups/channels to pick from.
 - `/setsource <number|id|@username>` - set the chat to mirror media from.

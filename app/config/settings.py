@@ -17,6 +17,7 @@ class AppSettings:
     api_id: int
     api_hash: str
     session_string: str
+    bot_token: str | None
     database_url: str
     source_chat: str | int | None
     dest_chat: str | int | None
@@ -102,6 +103,8 @@ def load_settings() -> AppSettings:
     assert api_hash is not None
     assert session_string is not None
 
+    bot_token = os.getenv("BOT_TOKEN", "").strip() or None
+
     source_chat = _parse_optional_chat_reference(os.getenv("SOURCE_CHAT_ID"))
     dest_chat = _parse_optional_chat_reference(os.getenv("DEST_CHAT_ID"))
 
@@ -126,6 +129,7 @@ def load_settings() -> AppSettings:
         api_id=api_id,
         api_hash=api_hash,
         session_string=session_string,
+        bot_token=bot_token,
         database_url=database_url,
         source_chat=source_chat,
         dest_chat=dest_chat,
@@ -144,6 +148,7 @@ SETTINGS = load_settings()
 API_ID = SETTINGS.api_id
 API_HASH = SETTINGS.api_hash
 SESSION_STRING = SETTINGS.session_string
+BOT_TOKEN = SETTINGS.bot_token
 DATABASE_URL = SETTINGS.database_url
 SOURCE_CHAT_ID = SETTINGS.source_chat
 DEST_CHAT_ID = SETTINGS.dest_chat
