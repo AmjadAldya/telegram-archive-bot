@@ -208,6 +208,38 @@ SQLite data is stored in the `mirror-data` volume. `SESSION_STRING` should be
 generated once locally and passed in via `.env` - never generate it inside
 the container.
 
+To update to a new version of the code on the server:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+### Automated deploy via GitHub Actions (manual trigger)
+
+`.github/workflows/deploy.yml` lets you redeploy `main` to the droplet by
+clicking **Run workflow** in the GitHub Actions tab - it never runs on push,
+only on demand. It SSHes into the droplet and runs `git reset --hard
+origin/main`, rebuilds the image, applies any new Alembic migration against
+that freshly built image, then starts the container.
+
+Before using it, add these repository secrets under **Settings → Secrets and
+variables → Actions → New repository secret**:
+
+| Secret | Value |
+|---|---|
+| `DO_HOST` | Droplet IP or domain |
+| `DO_USER` | SSH username used for deploys |
+| `DO_SSH_KEY` | Private key (PEM) for that user - generate a **dedicated deploy key**, don't reuse your personal key |
+| `DO_PORT` | SSH port (usually `22`) |
+| `DO_APP_PATH` | Absolute path to the cloned repo on the droplet, e.g. `/home/deploy/telegram-archive-bot` |
+
+Recommended: create a separate low-privilege `deploy` user on the droplet
+(only able to `git pull` and run `docker compose` in this one directory)
+rather than using `root`'s key. The droplet needs its own `.env` (with the
+real `SESSION_STRING`, etc.) already in place at `DO_APP_PATH` - the
+workflow only pulls code and rebuilds, it never touches `.env`.
+
 ## Deployment notes
 
 - Keep `.env` out of Git; `SESSION_STRING` is as sensitive as a password.
