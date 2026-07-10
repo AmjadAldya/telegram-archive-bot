@@ -224,7 +224,17 @@ origin/main`, rebuilds the image, applies any new Alembic migration against
 that freshly built image, then starts the container.
 
 Before using it, add these repository secrets under **Settings → Secrets and
-variables → Actions → New repository secret**:
+variables → Actions → New repository secret**. To collect all five values in
+one shot, run [deploy/setup_deploy_secrets.sh](deploy/setup_deploy_secrets.sh)
+**on the droplet**, from inside the cloned repo directory:
+
+```bash
+bash deploy/setup_deploy_secrets.sh
+```
+
+It generates a dedicated SSH deploy key (separate from your personal one),
+authorizes it for the current user, and prints all five secret values ready
+to paste in. Safe to re-run - it reuses the key if one already exists.
 
 | Secret | Value |
 |---|---|
