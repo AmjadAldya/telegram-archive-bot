@@ -215,6 +215,16 @@ git pull
 docker compose up -d --build
 ```
 
+### First deploy / manual redeploy
+
+[deploy/manual_deploy.sh](deploy/manual_deploy.sh) does a full deploy in one
+step - clones the repo if it isn't there yet (or pulls `main` if it is),
+creates `.env` from the template on first run, builds the image, applies
+Alembic migrations, and starts the service. Paste it into a shell on the
+server and run it, or save it and run `bash manual_deploy.sh`. This is the
+same thing the GitHub Actions workflow below does automatically - use this
+script for the first deploy, or any time you'd rather trigger it by hand.
+
 ### Automated deploy via GitHub Actions (manual trigger)
 
 `.github/workflows/deploy.yml` lets you redeploy `main` to the droplet by
