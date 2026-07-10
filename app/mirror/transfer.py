@@ -66,12 +66,32 @@ async def transfer_message(client, message, dest_chat_id: str | int) -> Transfer
 
         await rate_limiter.wait()
         try:
-            copied = await call_with_flood_wait(
-                client.copy_message,
-                chat_id=dest_chat_id,
-                from_chat_id=message.chat.id,
-                message_id=message.id,
-            )
+           # 1. تنزيل الوسائط إلى السيرفر المحلي
+        downloaded_file = await call_with_flood_wait(
+            client.download_media,
+            message=message
+        )
+        
+        copied = None
+        if downloaded_file:
+            # 2. إعادة الرفع بناءً على نوع الملف
+            if media_info.media_type == "photo":
+                copied = await call_with_flood_wait(
+                    client.send_photo,
+                    chat_id=dest_chat_id,
+                    photo=downloaded_file
+                )
+            elif media_info.media_type == "video":
+                copied = await call_with_flood_wait(
+                    client.send_video,
+                    chat_id=dest_chat_id,
+                    video=downloaded_file
+                )
+            
+            # 3. حذف الملف المؤقت
+            import os
+            if os.path.exists(downloaded_file):
+                os.remove(downloaded_file)
         except AccountRestrictedError as exc:
             control.mark_restricted(str(exc))
             raise
