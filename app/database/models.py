@@ -113,8 +113,11 @@ class SyncState(Base):
         resume_before = (
             self.resume_before_message_id if self.resume_before_message_id is not None else "none"
         )
-        return (
+        line = (
             f"status={status} source={self.source_chat_id} dest={self.dest_chat_id} "
             f"processed={self.processed_messages} transferred={self.transferred_messages} "
             f"duplicates={self.duplicate_messages} resume_before={resume_before}"
         )
+        if self.last_error:
+            line += f"\nlast_error: {self.last_error}"
+        return line

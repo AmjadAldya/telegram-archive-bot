@@ -88,6 +88,22 @@ def test_sync_state_lifecycle() -> None:
         assert reset.resume_before_message_id is None
 
 
+def test_sync_state_summary_includes_last_error_only_when_present() -> None:
+    init_db()
+
+    with session_scope() as session:
+        repository = MirrorRepository(session)
+        state = repository.get_or_create_sync_state("-100111", "-100222")
+        assert "last_error" not in state.summary()
+
+        failed = repository.mark_status(
+            state.id, SyncStatus.FAILED, last_error="boom: PEER_ID_INVALID"
+        )
+        summary = failed.summary()
+        assert "status=failed" in summary
+        assert "last_error: boom: PEER_ID_INVALID" in summary
+
+
 def test_mirror_config_is_a_singleton_updated_in_place() -> None:
     init_db()
 
