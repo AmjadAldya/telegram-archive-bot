@@ -7,7 +7,14 @@
 
 set -uo pipefail
 
-REPO_URL="https://github.com/AmjadAldya/telegram-archive-bot.git"
+# Reuse the SSH deploy key from deploy/bootstrap_deploy.sh if it's already
+# set up on this server; otherwise fall back to HTTPS (only works if this
+# repo is public, or you have git credentials configured some other way).
+if grep -q "^Host github-telegram-archive-bot$" "$HOME/.ssh/config" 2>/dev/null; then
+    REPO_URL="git@github-telegram-archive-bot:AmjadAldya/telegram-archive-bot.git"
+else
+    REPO_URL="https://github.com/AmjadAldya/telegram-archive-bot.git"
+fi
 APP_PATH=""
 
 echo "==> Looking for a running/stopped container that looks like this bot..."
@@ -63,6 +70,16 @@ else
     git clone "$REPO_URL" "$APP_PATH"
     cd "$APP_PATH"
 fi
+
+if [ ! -f "$APP_PATH/docker-compose.yml" ]; then
+    echo ""
+    echo "ERROR: $APP_PATH/docker-compose.yml doesn't exist - the clone/update did not"
+    echo "succeed. Scroll up for the actual git error. If this is a private repo and you"
+    echo "don't have git credentials set up on this server yet, run"
+    echo "deploy/bootstrap_deploy.sh instead (nothing below this point ran)."
+    exit 1
+fi
+cd "$APP_PATH"
 
 if [ ! -f .env ]; then
     echo "==> No .env found at $APP_PATH/.env - creating one from .env.example."

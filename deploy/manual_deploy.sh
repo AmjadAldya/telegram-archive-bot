@@ -13,8 +13,16 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/AmjadAldya/telegram-archive-bot.git"
 DEFAULT_PATH="$HOME/telegram-archive-bot"
+
+# Reuse the SSH deploy key from deploy/bootstrap_deploy.sh if it's already
+# set up on this server; otherwise fall back to HTTPS (only works if this
+# repo is public, or you have git credentials configured some other way).
+if grep -q "^Host github-telegram-archive-bot$" "$HOME/.ssh/config" 2>/dev/null; then
+    REPO_URL="git@github-telegram-archive-bot:AmjadAldya/telegram-archive-bot.git"
+else
+    REPO_URL="https://github.com/AmjadAldya/telegram-archive-bot.git"
+fi
 
 read -rp "App directory on this server [$DEFAULT_PATH]: " APP_PATH
 APP_PATH="${APP_PATH:-$DEFAULT_PATH}"
@@ -26,9 +34,8 @@ if [ -d "$APP_PATH/.git" ]; then
     git reset --hard origin/main
 else
     echo "==> No clone found at $APP_PATH, cloning fresh..."
-    echo "    (If this repo is private and cloning fails, either use an SSH"
-    echo "     remote you already have access to, or a personal access token:"
-    echo "     git clone https://<token>@github.com/AmjadAldya/telegram-archive-bot.git)"
+    echo "    (Private repo and no SSH deploy key yet? Run deploy/bootstrap_deploy.sh"
+    echo "     instead - it sets one up for you.)"
     git clone "$REPO_URL" "$APP_PATH"
     cd "$APP_PATH"
 fi

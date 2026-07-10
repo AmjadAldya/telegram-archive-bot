@@ -215,6 +215,17 @@ git pull
 docker compose up -d --build
 ```
 
+### First deploy on a fresh server (private repo)
+
+This repository is private, so a plain `git clone https://...` on a new
+server fails with `Authentication failed` (GitHub dropped password auth for
+git operations years ago). [deploy/bootstrap_deploy.sh](deploy/bootstrap_deploy.sh)
+sets up a dedicated, **read-only** SSH deploy key just for pulling this repo
+(separate from any key used to log into the server itself), walks you
+through adding it as a Deploy Key on GitHub, then clones and deploys. Use
+this the first time you deploy to a new server; after that,
+`manual_deploy.sh`/`find_and_redeploy.sh` below reuse the same key.
+
 ### First deploy / manual redeploy
 
 [deploy/manual_deploy.sh](deploy/manual_deploy.sh) does a full deploy in one
