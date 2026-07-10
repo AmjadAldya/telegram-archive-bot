@@ -24,6 +24,7 @@ class FakeMessage:
     id: int
     chat: FakeChat
     photo: FakeFile | None = None
+    video: FakeFile | None = None
 
 
 @dataclass(slots=True)
@@ -33,13 +34,22 @@ class FakeCopiedMessage:
 
 class FakeClient:
     def __init__(self) -> None:
-        self.copy_calls: list[dict] = []
+        self.send_calls: list[dict] = []
+        self.download_calls: list[dict] = []
         self._next_id = 1000
 
-    async def copy_message(self, chat_id, from_chat_id, message_id):
-        self.copy_calls.append(
-            {"chat_id": chat_id, "from_chat_id": from_chat_id, "message_id": message_id}
-        )
+    async def download_media(self, message):
+        self.download_calls.append({"message": message})
+        # إرجاع مسار وهمي لتجاوز شرط if downloaded_file بنجاح في الاختبار
+        return "fake_downloaded_file.jpg"
+
+    async def send_photo(self, chat_id, photo):
+        self.send_calls.append({"chat_id": chat_id, "photo": photo})
+        self._next_id += 1
+        return FakeCopiedMessage(id=self._next_id)
+
+    async def send_video(self, chat_id, video):
+        self.send_calls.append({"chat_id": chat_id, "video": video})
         self._next_id += 1
         return FakeCopiedMessage(id=self._next_id)
 
@@ -53,7 +63,7 @@ def test_transfer_message_copies_new_media() -> None:
         result = await transfer_message(client, message, dest_chat_id=-100222)
 
         assert result == "transferred"
-        assert len(client.copy_calls) == 1
+        assert len(client.send_calls) == 1
         with session_scope() as session:
             repository = MirrorRepository(session)
             assert repository.is_duplicate("-100222", "f1") is True
@@ -75,7 +85,7 @@ def test_transfer_message_skips_duplicate_media() -> None:
 
         assert first == "transferred"
         assert second == "duplicate"
-        assert len(client.copy_calls) == 1
+        assert len(client.send_calls) == 1
 
     asyncio.run(scenario())
 
@@ -89,7 +99,7 @@ def test_transfer_message_skips_non_media_messages() -> None:
         result = await transfer_message(client, message, dest_chat_id=-100222)
 
         assert result == "skipped"
-        assert client.copy_calls == []
+        assert client.send_calls == []
 
     asyncio.run(scenario())
 
@@ -107,6 +117,6 @@ def test_transfer_message_skips_when_account_restricted() -> None:
             control.resume()
 
         assert result == "skipped"
-        assert client.copy_calls == []
+        assert client.send_calls == []
 
     asyncio.run(scenario())
