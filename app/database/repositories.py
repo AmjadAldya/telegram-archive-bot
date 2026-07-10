@@ -3,138 +3,120 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.config.settings import DATA_DIR
-from app.database.models import ArchiveJob, ArchiveJobStatus
+from app.database.models import SyncState, SyncStatus, TransferredMedia
 
 
-class ArchiveJobRepository:
+class MirrorRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_job(self, requested_by: int, source_chat_id: str) -> ArchiveJob:
-        job = ArchiveJob(
-            requested_by=requested_by,
-            source_chat_id=source_chat_id,
-            archive_path="",
-            status=ArchiveJobStatus.QUEUED,
+    # -- dedup ledger -----------------------------------------------------
+
+    def is_duplicate(self, dest_chat_id: str, file_unique_id: str) -> bool:
+        statement = select(TransferredMedia.id).where(
+            TransferredMedia.dest_chat_id == dest_chat_id,
+            TransferredMedia.file_unique_id == file_unique_id,
         )
-        self.session.add(job)
-        self.session.flush()
-        job.archive_path = str(DATA_DIR / "archive" / job.id)
-        self.session.flush()
-        self.session.refresh(job)
-        return job
+        return self.session.scalars(statement).first() is not None
 
-    def get_job(self, job_id: str) -> ArchiveJob | None:
-        return self.session.get(ArchiveJob, job_id)
-
-    def get_job_or_raise(self, job_id: str) -> ArchiveJob:
-        job = self.get_job(job_id)
-        if job is None:
-            raise LookupError(f"Archive job {job_id} was not found")
-        return job
-
-    def list_recent_jobs(self, limit: int = 10) -> list[ArchiveJob]:
-        statement = select(ArchiveJob).order_by(ArchiveJob.updated_at.desc()).limit(limit)
-        return list(self.session.scalars(statement))
-
-    def list_pending_jobs(self) -> list[ArchiveJob]:
-        statement = select(ArchiveJob).where(
-            ArchiveJob.status.in_([ArchiveJobStatus.QUEUED, ArchiveJobStatus.RUNNING])
-        )
-        return list(self.session.scalars(statement))
-
-    def mark_running(self, job_id: str) -> ArchiveJob:
-        job = self.get_job_or_raise(job_id)
-        job.status = ArchiveJobStatus.RUNNING
-        job.updated_at = datetime.now(timezone.utc)
-        self.session.flush()
-        self.session.refresh(job)
-        return job
-
-    def update_progress(
+    def record_transfer(
         self,
-        job_id: str,
         *,
-        processed_messages: int,
-        media_messages: int,
-        resume_after_message_id: int | None,
-    ) -> ArchiveJob:
-        job = self.get_job_or_raise(job_id)
-        job.processed_messages = processed_messages
-        job.media_messages = media_messages
-        job.resume_after_message_id = resume_after_message_id
-        job.updated_at = datetime.now(timezone.utc)
+        file_unique_id: str,
+        media_type: str,
+        source_chat_id: str,
+        source_message_id: int,
+        dest_chat_id: str,
+        dest_message_id: int | None,
+    ) -> bool:
+        """Record a completed transfer. Returns False if it was already recorded.
+
+        Relies on the DB unique constraint as the source of truth so
+        concurrent callers can never double-record the same file.
+        """
+        record = TransferredMedia(
+            file_unique_id=file_unique_id,
+            media_type=media_type,
+            source_chat_id=source_chat_id,
+            source_message_id=source_message_id,
+            dest_chat_id=dest_chat_id,
+            dest_message_id=dest_message_id,
+        )
+        self.session.add(record)
+        try:
+            self.session.flush()
+        except IntegrityError:
+            self.session.rollback()
+            return False
+        return True
+
+    # -- sync state ---------------------------------------------------------
+
+    def get_or_create_sync_state(self, source_chat_id: str, dest_chat_id: str) -> SyncState:
+        statement = select(SyncState).where(
+            SyncState.source_chat_id == source_chat_id,
+            SyncState.dest_chat_id == dest_chat_id,
+        )
+        state = self.session.scalars(statement).first()
+        if state is not None:
+            return state
+
+        state = SyncState(source_chat_id=source_chat_id, dest_chat_id=dest_chat_id)
+        self.session.add(state)
         self.session.flush()
-        self.session.refresh(job)
-        return job
+        self.session.refresh(state)
+        return state
 
-    def mark_completed(self, job_id: str) -> ArchiveJob:
-        job = self.get_job_or_raise(job_id)
-        job.status = ArchiveJobStatus.COMPLETED
-        job.completed_at = datetime.now(timezone.utc)
-        job.updated_at = job.completed_at
+    def update_sync_progress(
+        self,
+        sync_state_id: str,
+        *,
+        processed_delta: int = 0,
+        transferred_delta: int = 0,
+        duplicate_delta: int = 0,
+        resume_before_message_id: int | None = None,
+    ) -> SyncState:
+        state = self.session.get(SyncState, sync_state_id)
+        if state is None:
+            raise LookupError(f"Sync state {sync_state_id} was not found")
+
+        state.processed_messages += processed_delta
+        state.transferred_messages += transferred_delta
+        state.duplicate_messages += duplicate_delta
+        if resume_before_message_id is not None:
+            state.resume_before_message_id = resume_before_message_id
+        state.updated_at = datetime.now(timezone.utc)
         self.session.flush()
-        self.session.refresh(job)
-        return job
+        self.session.refresh(state)
+        return state
 
-    def mark_failed(self, job_id: str, error_message: str) -> ArchiveJob:
-        job = self.get_job_or_raise(job_id)
-        job.status = ArchiveJobStatus.FAILED
-        job.last_error = error_message
-        job.failed_at = datetime.now(timezone.utc)
-        job.updated_at = datetime.now(timezone.utc)
+    def mark_status(
+        self,
+        sync_state_id: str,
+        status: SyncStatus,
+        *,
+        last_error: str | None = None,
+    ) -> SyncState:
+        state = self.session.get(SyncState, sync_state_id)
+        if state is None:
+            raise LookupError(f"Sync state {sync_state_id} was not found")
+
+        state.status = status
+        state.last_error = last_error
+        state.updated_at = datetime.now(timezone.utc)
         self.session.flush()
-        self.session.refresh(job)
-        return job
+        self.session.refresh(state)
+        return state
 
-    def request_cancel(self, job_id: str) -> ArchiveJob:
-        job = self.get_job_or_raise(job_id)
-        now = datetime.now(timezone.utc)
-
-        if job.status == ArchiveJobStatus.QUEUED:
-            job.status = ArchiveJobStatus.CANCELLED
-            job.cancelled_at = now
-        elif job.status == ArchiveJobStatus.RUNNING:
-            job.status = ArchiveJobStatus.CANCEL_REQUESTED
-            job.cancel_requested_at = now
-        elif job.status in {
-            ArchiveJobStatus.COMPLETED,
-            ArchiveJobStatus.FAILED,
-            ArchiveJobStatus.CANCELLED,
-        }:
-            raise RuntimeError(f"Archive job {job_id} is already {job.status.value}")
-
-        job.updated_at = now
+    def reset_sync_state(self, source_chat_id: str, dest_chat_id: str) -> SyncState:
+        state = self.get_or_create_sync_state(source_chat_id, dest_chat_id)
+        state.resume_before_message_id = None
+        state.status = SyncStatus.IDLE
+        state.last_error = None
+        state.updated_at = datetime.now(timezone.utc)
         self.session.flush()
-        self.session.refresh(job)
-        return job
-
-    def mark_cancelled(self, job_id: str) -> ArchiveJob:
-        job = self.get_job_or_raise(job_id)
-        job.status = ArchiveJobStatus.CANCELLED
-        job.cancelled_at = datetime.now(timezone.utc)
-        job.updated_at = job.cancelled_at
-        self.session.flush()
-        self.session.refresh(job)
-        return job
-
-    def retry_job(self, job_id: str) -> ArchiveJob:
-        job = self.get_job_or_raise(job_id)
-
-        if job.status != ArchiveJobStatus.FAILED:
-            raise RuntimeError(f"Archive job {job_id} is not failed")
-        if job.retry_count >= job.max_retries:
-            raise RuntimeError(f"Archive job {job_id} reached max retries")
-
-        job.retry_count += 1
-        job.status = ArchiveJobStatus.QUEUED
-        job.last_error = None
-        job.failed_at = None
-        job.completed_at = None
-        job.updated_at = datetime.now(timezone.utc)
-        self.session.flush()
-        self.session.refresh(job)
-        return job
+        self.session.refresh(state)
+        return state

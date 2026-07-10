@@ -1,51 +1,88 @@
 from __future__ import annotations
 
 from app.database.base import init_db, session_scope
-from app.database.models import ArchiveJobStatus
-from app.database.repositories import ArchiveJobRepository
+from app.database.models import SyncStatus
+from app.database.repositories import MirrorRepository
 
 
-def test_archive_job_repository_tracks_lifecycle() -> None:
+def test_record_transfer_prevents_duplicates_for_same_destination() -> None:
     init_db()
 
     with session_scope() as session:
-        repository = ArchiveJobRepository(session)
-        job = repository.create_job(requested_by=123456789, source_chat_id="me")
-        pending_ids = [pending_job.id for pending_job in repository.list_pending_jobs()]
+        repository = MirrorRepository(session)
 
-        assert job.status == ArchiveJobStatus.QUEUED
-        assert job.id in pending_ids
-
-        running_job = repository.mark_running(job.id)
-        assert running_job.status == ArchiveJobStatus.RUNNING
-
-        progress_job = repository.update_progress(
-            job.id,
-            processed_messages=12,
-            media_messages=4,
-            resume_after_message_id=88,
+        first = repository.record_transfer(
+            file_unique_id="file-1",
+            media_type="photo",
+            source_chat_id="-100111",
+            source_message_id=10,
+            dest_chat_id="-100222",
+            dest_message_id=99,
         )
-        assert progress_job.processed_messages == 12
-        assert progress_job.media_messages == 4
-        assert progress_job.resume_after_message_id == 88
+        assert first is True
+        assert repository.is_duplicate("-100222", "file-1") is True
 
-        completed_job = repository.mark_completed(job.id)
-        assert completed_job.status == ArchiveJobStatus.COMPLETED
-        assert completed_job.completed_at is not None
+    with session_scope() as session:
+        repository = MirrorRepository(session)
+        second = repository.record_transfer(
+            file_unique_id="file-1",
+            media_type="photo",
+            source_chat_id="-100111",
+            source_message_id=11,
+            dest_chat_id="-100222",
+            dest_message_id=100,
+        )
+        assert second is False
 
-        failed_job = repository.mark_failed(job.id, "boom")
-        assert failed_job.status == ArchiveJobStatus.FAILED
-        assert failed_job.failed_at is not None
 
-        requeued_job = repository.retry_job(job.id)
-        assert requeued_job.status == ArchiveJobStatus.QUEUED
-        assert requeued_job.retry_count == 1
+def test_record_transfer_allows_same_file_to_different_destinations() -> None:
+    init_db()
 
-        queued_cancel_job = repository.create_job(requested_by=123456789, source_chat_id="me")
-        cancelled_job = repository.request_cancel(queued_cancel_job.id)
-        assert cancelled_job.status == ArchiveJobStatus.CANCELLED
+    with session_scope() as session:
+        repository = MirrorRepository(session)
+        assert repository.record_transfer(
+            file_unique_id="file-1",
+            media_type="photo",
+            source_chat_id="-100111",
+            source_message_id=10,
+            dest_chat_id="-100222",
+            dest_message_id=99,
+        )
+        assert repository.record_transfer(
+            file_unique_id="file-1",
+            media_type="photo",
+            source_chat_id="-100111",
+            source_message_id=10,
+            dest_chat_id="-100333",
+            dest_message_id=1,
+        )
 
-        running_cancel_job = repository.create_job(requested_by=123456789, source_chat_id="me")
-        repository.mark_running(running_cancel_job.id)
-        cancel_requested_job = repository.request_cancel(running_cancel_job.id)
-        assert cancel_requested_job.status == ArchiveJobStatus.CANCEL_REQUESTED
+
+def test_sync_state_lifecycle() -> None:
+    init_db()
+
+    with session_scope() as session:
+        repository = MirrorRepository(session)
+        state = repository.get_or_create_sync_state("-100111", "-100222")
+        assert state.status == SyncStatus.IDLE
+        same_state = repository.get_or_create_sync_state("-100111", "-100222")
+        assert same_state.id == state.id
+
+        updated = repository.update_sync_progress(
+            state.id,
+            processed_delta=5,
+            transferred_delta=3,
+            duplicate_delta=2,
+            resume_before_message_id=42,
+        )
+        assert updated.processed_messages == 5
+        assert updated.transferred_messages == 3
+        assert updated.duplicate_messages == 2
+        assert updated.resume_before_message_id == 42
+
+        completed = repository.mark_status(state.id, SyncStatus.COMPLETED)
+        assert completed.status == SyncStatus.COMPLETED
+
+        reset = repository.reset_sync_state("-100111", "-100222")
+        assert reset.status == SyncStatus.IDLE
+        assert reset.resume_before_message_id is None

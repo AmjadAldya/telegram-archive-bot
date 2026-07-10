@@ -12,10 +12,12 @@ TEST_ROOT.mkdir(parents=True, exist_ok=True)
 
 os.environ.setdefault("API_ID", "123456")
 os.environ.setdefault("API_HASH", "test-api-hash")
-os.environ.setdefault("BOT_TOKEN", "123456:test-token")
-os.environ.setdefault("ADMIN_ID", "123456789")
-os.environ.setdefault("ADMIN_IDS", "123456789")
-os.environ.setdefault("ARCHIVE_CHAT_ID", "me")
+os.environ.setdefault("SESSION_STRING", "test-session-string")
+os.environ.setdefault("SOURCE_CHAT_ID", "-1001111111111")
+os.environ.setdefault("DEST_CHAT_ID", "-1002222222222")
+os.environ.setdefault("MIN_DELAY_SECONDS", "0")
+os.environ.setdefault("MAX_DELAY_SECONDS", "0")
+os.environ.setdefault("SYNC_HISTORY_ON_START", "false")
 os.environ.setdefault("DATA_DIR", str(TEST_ROOT))
 os.environ["DATABASE_URL"] = f"sqlite:///{(TEST_ROOT / 'test.db').as_posix()}"
 
@@ -25,11 +27,9 @@ def reset_database() -> None:
     from alembic import command
 
     from app.database.base import Base, build_alembic_config, get_engine
-    from app.services.queue import queue
+    from app.mirror import control
 
-    while not queue.empty():
-        queue.get_nowait()
-        queue.task_done()
+    control.resume()
 
     engine = get_engine()
     Base.metadata.drop_all(bind=engine)

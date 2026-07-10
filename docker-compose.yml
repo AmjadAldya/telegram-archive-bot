@@ -1,11 +1,11 @@
 services:
-  bot:
+  mirror:
     build: .
     env_file:
       - .env
     volumes:
-      - archive-data:/app/data
+      - mirror-data:/app/data
     restart: unless-stopped
 
 volumes:
-  archive-data:
+  mirror-data:
