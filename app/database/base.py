@@ -64,6 +64,13 @@ def build_alembic_config() -> Config:
     config = Config(str(project_root / "alembic.ini"))
     config.set_main_option("script_location", str(project_root / "migrations"))
     config.set_main_option("sqlalchemy.url", DATABASE_URL)
+    # Migrations run in-process on every startup (see init_db() below). Letting
+    # migrations/env.py apply alembic.ini's own logging config there would
+    # clobber the app's logger (app/services/logger.py) - notably downgrading
+    # the root logger to WARN, which silently drops every INFO log the bot
+    # emits for the rest of the process. Only the `alembic` CLI needs that
+    # console logging setup; skip it when driven programmatically like this.
+    config.attributes["configure_logger"] = False
     return config
 
 

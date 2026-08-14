@@ -16,8 +16,15 @@ from app.database.base import Base  # noqa: E402
 from app.database import models  # noqa: F401,E402
 
 config = context.config
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
+    # disable_existing_loggers defaults to True, which silently disables any
+    # logger created before this runs (e.g. app.services.logger's "archive-bot"
+    # logger, since migrations run in-process via app.database.base.init_db()
+    # on every startup) - killing all of the app's own logging for the rest
+    # of the process. app.database.base.build_alembic_config() sets
+    # configure_logger=False for that in-process path so this block only
+    # still runs for the `alembic` CLI, which does want console logging.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 target_metadata = Base.metadata

@@ -81,12 +81,28 @@ async def _seed_from_env_if_unset() -> None:
     logger.info("Seeded mirror config from .env: %s -> %s", source_chat.title, dest_chat.title)
 
 
+async def _warm_peer_cache() -> None:
+    """Populate Pyrogram's (in-memory, per-process) peer cache on every startup.
+
+    Resolving a chat by bare numeric ID - as get_chat_history/get_chat do -
+    fails for a channel Pyrogram hasn't "seen" yet this session: its local
+    fallback (utils.get_peer_type) rejects IDs outside a hardcoded range that
+    doesn't cover every valid channel ID. Walking the dialog list once
+    populates the cache from real server data instead, the same way /chats
+    does, so the configured source/dest chats resolve correctly afterwards.
+    """
+    async for _ in bot.get_dialogs():
+        pass
+
+
 async def run_bot() -> None:
     await asyncio.to_thread(init_db)
 
     await bot.start()
     me = await bot.get_me()
     logger.info("Userbot started as %s (id=%s)", me.username or me.first_name, me.id)
+
+    await _warm_peer_cache()
 
     if control_bot is not None:
         await control_bot.start()

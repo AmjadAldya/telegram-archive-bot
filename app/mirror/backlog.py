@@ -103,7 +103,18 @@ async def sync_backlog(client) -> None:
             if control.is_restricted():
                 break
 
-            result = await transfer_message(client, message, pair.dest_chat_id)
+            try:
+                result = await transfer_message(client, message, pair.dest_chat_id)
+            except AccountRestrictedError:
+                raise
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Failed to transfer message %s, skipping it and continuing", message.id
+                )
+                result = "skipped"
+
             await asyncio.to_thread(
                 _update_progress,
                 state_id,

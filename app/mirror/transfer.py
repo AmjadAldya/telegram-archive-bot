@@ -61,7 +61,16 @@ async def transfer_message(client, message, dest_chat_id: str | int) -> Transfer
                 client.download_media,
                 message=message
             )
-            
+
+            if downloaded_file and os.path.getsize(downloaded_file) == 0:
+                logger.warning(
+                    "Downloaded 0 B for message %s (media likely no longer available "
+                    "from Telegram - protected/expired content), skipping",
+                    message.id,
+                )
+                os.remove(downloaded_file)
+                return "skipped"
+
             copied = None
             if downloaded_file:
                 if media_info.media_type == "photo":
