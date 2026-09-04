@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from dataclasses import dataclass
 
 from app.database.base import init_db, session_scope
@@ -41,8 +42,12 @@ class FakeClient:
 
     async def download_media(self, message):
         self.download_calls.append({"message": message})
-        # إرجاع مسار وهمي لتجاوز شرط if downloaded_file بنجاح في الاختبار
-        return "fake_downloaded_file.jpg"
+        # transfer_message checks the downloaded file's size and later
+        # removes it, so this needs to be a real (non-empty) file on disk,
+        # not just a fake path.
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as handle:
+            handle.write(b"fake media bytes")
+        return handle.name
 
     async def send_photo(self, chat_id, photo):
         self.send_calls.append({"chat_id": chat_id, "photo": photo})
@@ -107,7 +112,9 @@ def test_transfer_message_copies_animation() -> None:
         result = await transfer_message(client, message, dest_chat_id=-100222)
 
         assert result == "transferred"
-        assert client.send_calls == [{"chat_id": -100222, "animation": "fake_downloaded_file.jpg"}]
+        assert len(client.send_calls) == 1
+        assert client.send_calls[0]["chat_id"] == -100222
+        assert "animation" in client.send_calls[0]
 
     asyncio.run(scenario())
 
