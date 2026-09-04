@@ -85,7 +85,13 @@ async def transfer_message(client, message, dest_chat_id: str | int) -> Transfer
                         chat_id=dest_chat_id,
                         video=downloaded_file
                     )
-                
+                elif media_info.media_type == "animation":
+                    copied = await call_with_flood_wait(
+                        client.send_animation,
+                        chat_id=dest_chat_id,
+                        animation=downloaded_file
+                    )
+
                 if os.path.exists(downloaded_file):
                     os.remove(downloaded_file)
                     

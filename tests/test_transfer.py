@@ -25,6 +25,7 @@ class FakeMessage:
     chat: FakeChat
     photo: FakeFile | None = None
     video: FakeFile | None = None
+    animation: FakeFile | None = None
 
 
 @dataclass(slots=True)
@@ -50,6 +51,11 @@ class FakeClient:
 
     async def send_video(self, chat_id, video):
         self.send_calls.append({"chat_id": chat_id, "video": video})
+        self._next_id += 1
+        return FakeCopiedMessage(id=self._next_id)
+
+    async def send_animation(self, chat_id, animation):
+        self.send_calls.append({"chat_id": chat_id, "animation": animation})
         self._next_id += 1
         return FakeCopiedMessage(id=self._next_id)
 
@@ -86,6 +92,22 @@ def test_transfer_message_skips_duplicate_media() -> None:
         assert first == "transferred"
         assert second == "duplicate"
         assert len(client.send_calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_transfer_message_copies_animation() -> None:
+    async def scenario() -> None:
+        init_db()
+        client = FakeClient()
+        message = FakeMessage(
+            id=1, chat=FakeChat(id=-100111), animation=FakeFile(file_unique_id="a1")
+        )
+
+        result = await transfer_message(client, message, dest_chat_id=-100222)
+
+        assert result == "transferred"
+        assert client.send_calls == [{"chat_id": -100222, "animation": "fake_downloaded_file.jpg"}]
 
     asyncio.run(scenario())
 

@@ -15,13 +15,18 @@ from app.mirror.dialogs import (
     picker_chats,
     resolve_reference,
 )
+from app.mirror.links import parse_message_link
 from app.mirror.listener import handle_incoming_media
+from app.mirror.throttle import AccountRestrictedError
+from app.mirror.transfer import transfer_message
 
 HELP_TEXT = (
     "Mirror control panel - commands only work for the account owner.\n\n"
     "/chats [page] - list your groups/channels\n"
     "/setsource - tap the chat to mirror media from\n"
     "/setdest - tap the chat to mirror media into (owner/admin only)\n"
+    "/convert <t.me link> - transfer one photo/video/animation message into "
+    "the destination chat (or just send the link on its own)\n"
     "/status - show the configured pair and backlog progress\n"
     "/pause - stop transferring media until /resume\n"
     "/resume - resume transferring media\n"
@@ -34,12 +39,15 @@ BOT_COMMAND_MENU = [
     ("chats", "List your groups/channels"),
     ("setsource", "Pick the chat to mirror media from"),
     ("setdest", "Pick the chat to mirror media into"),
+    ("convert", "Transfer one media message by its t.me link"),
     ("status", "Show the configured pair and backlog progress"),
     ("pause", "Stop transferring media"),
     ("resume", "Resume transferring media"),
     ("resync", "Rescan the full source history"),
     ("help", "Show help"),
 ]
+
+_LINK_FILTER = filters.regex(r"(?i)t(?:elegram)?\.me/\S+")
 
 _ROLE_LABELS = {"src": "Source", "dst": "Destination"}
 
@@ -136,6 +144,58 @@ def register_control_commands(command_client, userbot_client, owner_filter) -> N
             "Tap the group/channel to mirror media INTO:",
             reply_markup=build_chat_keyboard(chats, role="dst", page=1),
         )
+
+    @command_client.on_message(
+        owner_filter & (filters.command("convert") | (filters.text & _LINK_FILTER))
+    )
+    async def convert_command(_, message):
+        command = getattr(message, "command", []) or []
+        if command:
+            if len(command) < 2:
+                await message.reply(
+                    "Usage: /convert <t.me link to a photo/video/animation message>"
+                )
+                return
+            raw_link = command[1]
+        else:
+            raw_link = message.text or ""
+
+        link = parse_message_link(raw_link)
+        if link is None:
+            await message.reply("Could not find a t.me message link in that.")
+            return
+
+        pair = runtime.current()
+        if pair is None:
+            await message.reply("Destination not configured yet - send /setdest first.")
+            return
+
+        try:
+            source_message = await userbot_client.get_messages(link.chat_ref, link.message_id)
+        except Exception as exc:
+            await message.reply(f"Could not fetch that message ({exc}).")
+            return
+
+        if source_message is None or getattr(source_message, "empty", False):
+            await message.reply(
+                "That message doesn't exist, or this account can't access that chat."
+            )
+            return
+
+        try:
+            result = await transfer_message(userbot_client, source_message, pair.dest_chat_id)
+        except AccountRestrictedError:
+            await message.reply("Telegram has restricted this account; conversion stopped.")
+            return
+
+        if result == "transferred":
+            await message.reply(f"Converted and sent to {pair.dest_title}.")
+        elif result == "duplicate":
+            await message.reply("Already mirrored before - skipped as a duplicate.")
+        else:
+            await message.reply(
+                "Skipped: not a supported media type, or the mirror is paused/restricted."
+            )
 
     @command_client.on_callback_query(owner_filter & filters.regex(r"^(sel|pg|cancel):"))
     async def picker_callback(_, callback_query):

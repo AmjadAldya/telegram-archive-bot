@@ -185,6 +185,11 @@ didn't set `BOT_TOKEN`):
   media from; or pass a number/id/@username directly.
 - `/setdest [number|id|@username]` - same, but only offers chats where
   you're the owner or an admin (required to be able to post into them).
+- `/convert <t.me link>` - transfer a single photo/video/animation message
+  (from any chat this account is in) straight into the configured
+  destination, the same way the live mirror does. You can also just send
+  the link on its own, with no command. Works with public links
+  (`t.me/username/123`) and private-chat links (`t.me/c/1234567890/123`).
 - `/status` - shows the configured pair, backlog progress, pause state.
 - `/pause` - stops transferring media until `/resume`.
 - `/resume` - resumes transferring media.
