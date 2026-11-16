@@ -14,59 +14,54 @@ connection to Telegram, not something running inside the app on your device.
 
 ## Features
 
-- Interactive setup: after logging in, list the groups/channels you're a
-  member of and pick the source and destination straight from Telegram, no
-  chat IDs to look up by hand. Your choice is saved in the database, so it
-  survives restarts.
-- Real-time mirroring: new media posted in the source chat is copied to the
-  destination chat automatically, no commands required.
-- One-time resumable backlog sync of the source chat's existing history once
-  a source/destination are set, so nothing already posted is missed.
-- Duplicate protection: every transferred file's Telegram `file_unique_id` is
-  recorded per destination chat, so the same media is never sent twice - even
-  across restarts or a full history rescan.
-- Anti-ban throttling: a single serialized sender with a randomized delay
-  between transfers, automatic `FloodWait`/`SlowmodeWait` backoff, and an
-  immediate, safe stop if Telegram restricts the account (`PeerFlood`,
-  ban, deactivation).
-- Media-only: text, stickers, polls, contacts, locations, and link previews
-  are ignored; the set of mirrored media types is configurable.
-- Owner-only control commands (`/chats`, `/setsource`, `/setdest`, `/status`,
-  `/pause`, `/resume`, `/resync`) usable only by the account owner - either
-  through a dedicated control bot with a proper "/" command menu (recommended,
-  set `BOT_TOKEN`), or from the userbot's own Saved Messages if you skip that.
-- Alembic-managed SQLite schema for the mirror config, dedup ledger, and sync
-  progress.
-- Docker/Compose deployment (with `restart: unless-stopped`) and CI checks
-  (tests, lint, format, type check).
+- **Multiple sources, one destination.** Mirror media from any number of
+  groups/channels into a single archive channel. The same file arriving from
+  two sources is archived once (dedup is per destination + Telegram
+  `file_unique_id`).
+- **Arabic admin panel** in a chat with your own control bot: `/panel` with a
+  live status summary and inline buttons, `/help` grouped by topic, a command
+  menu shown only in your chat, confirmations before anything destructive.
+- **Paste a `t.me` link, get the media archived** - no command needed. Works
+  for any chat the account can read, whether or not it is a configured source.
+- **Live monitor** (`/live`): one message that edits itself with progress, speed,
+  ETA and the queue, with Skip / Pause / Refresh buttons.
+- **Skip** the current file cleanly at any time; skipped files are listed in
+  `/skipped` and can be retried. Large files trigger a notice with a Skip
+  button (and an optional auto-skip limit).
+- Real-time mirroring plus a resumable backlog scan per source.
+- Reliability: per-file timeouts that scale with file size, stall detection,
+  automatic retries, FloodWait handling, and an immediate safe stop if Telegram
+  restricts the account.
+- Media-only: text, stickers, polls, contacts and link previews are ignored;
+  the mirrored media types are configurable.
+- Owner-only: every command and button is ignored (silently) for anyone but
+  the account behind `SESSION_STRING`.
+- Alembic-managed SQLite schema, Docker/Compose deployment, CI checks.
 
 ## How it works
 
-1. [app/bot/client.py](app/bot/client.py) logs in with a pre-generated
-   session string and starts the Pyrogram client (the "userbot"), plus a
-   second bot-token client for the control panel if `BOT_TOKEN` is set.
-2. [app/bot/handlers.py](app/bot/handlers.py) registers the control commands
-   on whichever client is the control panel (the dedicated bot, or the
-   userbot itself), restricted to the account owner's user ID, and always
-   registers the live media listener on the userbot.
-3. [app/mirror/runtime.py](app/mirror/runtime.py) holds the currently
-   configured source/destination pair (loaded from the database) and
-   (re)starts the backlog scan whenever it's set or changed.
-4. [app/mirror/backlog.py](app/mirror/backlog.py) scans the source chat's
-   history once (resumable), transferring any media not already recorded.
-5. [app/mirror/listener.py](app/mirror/listener.py) checks every incoming
-   media message against the currently configured source chat.
-6. [app/mirror/transfer.py](app/mirror/transfer.py) is the single choke point
-   for every transfer: it checks the dedup ledger, waits for the rate
-   limiter, serializes the actual send behind a lock, retries on
-   `FloodWait`, and records the result - used by both the live handler and
-   the backlog scan.
-7. [app/mirror/media.py](app/mirror/media.py) decides whether a message
-   carries mirror-worthy media and extracts its stable file identifier.
+1. [app/bot/client.py](app/bot/client.py) logs in with a pre-generated session
+   string (the "userbot"), starts the control bot if `BOT_TOKEN` is set, and
+   wires everything together.
+2. [app/bot/handlers.py](app/bot/handlers.py) registers the owner-only commands
+   and buttons; [panel.py](app/bot/panel.py), [live.py](app/bot/live.py) and
+   [linkflow.py](app/bot/linkflow.py) build the screens, the live monitor and the
+   link queue. The control bot cannot read source chats - every read goes
+   through the userbot.
+3. [app/mirror/runtime.py](app/mirror/runtime.py) holds the destination and the
+   sources and runs one backlog loop over the enabled sources, one after another,
+   each from its own cursor in `sync_state`.
+4. [app/mirror/listener.py](app/mirror/listener.py) routes live media from any
+   enabled source.
+5. [app/mirror/transfer.py](app/mirror/transfer.py) is the single choke point for
+   every transfer (live, backlog, pasted link): dedup, rate limit, one-at-a-time
+   lock, FloodWait retry, per-file timeout ([guard.py](app/mirror/guard.py)), skip,
+   ledger write. [jobs.py](app/mirror/jobs.py) tracks the jobs for the monitor.
 
-Media is moved with `copy_message`, which Telegram handles server-side (no
-download/re-upload through this process) and which does not add a "Forwarded
-from" tag to the destination message.
+Media is **downloaded by the userbot and uploaded again** (not `copy_message`),
+which is what makes protected/private chats work. Temp files live under
+`DATA_DIR/tmp` and are always removed (and swept at startup). Design notes:
+[docs/ADMIN_V2.md](docs/ADMIN_V2.md).
 
 ## Requirements
 
@@ -92,17 +87,16 @@ can act as your account.
 
 ## Controlling the mirror from a real bot (recommended)
 
-By default, control commands (`/chats`, `/setsource`, etc.) go through the
-userbot's own Saved Messages - simple, but it mixes bot replies into your
-personal notes. For a cleaner, more professional setup, create a real
+By default, control commands go through the userbot's own Saved Messages -
+simple, but it mixes bot replies into your personal notes and cannot show
+inline buttons. For a cleaner, more professional setup, create a real
 Telegram bot to act as a dedicated control panel:
 
 1. Message [@BotFather](https://t.me/BotFather) on Telegram, send `/newbot`,
    and follow the prompts (any name/username you like).
 2. Copy the token it gives you into `.env` as `BOT_TOKEN=123456:...`.
-3. Start (or restart) the mirror. It automatically registers a proper "/"
-   command menu on that bot - tap the menu button in the chat with your new
-   bot and every command shows up with a description, like any other bot.
+3. Open the bot and press **Start**, then start (or restart) the mirror. It
+   registers an Arabic "/" command menu scoped to your chat.
 
 Only the Telegram account behind `SESSION_STRING` can use these commands,
 no matter who else finds or messages the bot - every handler is filtered to
@@ -134,32 +128,23 @@ python -m app.main
 
 5. Pick the source and destination from inside Telegram (see next section).
 
-## Picking the source and destination
+## Setting up the destination and sources
 
-Send these commands to your control bot (see above), or from the userbot's
-own Saved Messages ("me") if you didn't set `BOT_TOKEN` - either way they
-never post visibly in the source/destination chats themselves:
+Send these to your control bot (or from the account's own Saved Messages if you
+did not set `BOT_TOKEN`):
 
-1. `/setsource` - shows a tappable list of every group/channel you're a
-   member of. Tap one to pick it as the source (the protected chat to read
-   from). Long lists get `◀ Prev` / `Next ▶` buttons.
-2. `/setdest` - same idea, but only lists groups/channels where you're the
-   **owner or an admin** - the only chats media can actually be copied into.
+1. `/setdest` - tap the channel to archive into. Only chats where the account is
+   owner or admin are offered. Changing an existing destination asks for
+   confirmation (the dedup ledger is per destination).
+2. `/addsource` - tap a group/channel, or send `/addsource <number | -100... id |
+   @username | invite link>`. The account must be able to read the chat; for an
+   invite link it asks before joining. `/sources` lists them; `/removesource`
+   deletes one (confirmation first; archived files and dedup history are kept).
 
-Both fall back to `/chats` (a plain numbered list) plus typing
-`/setsource <number>` / `/setsource -1001234567890` / `/setsource @username`
-if you'd rather not tap through buttons, or need a chat that isn't showing
-up. `/setdest` still enforces the owner/admin check either way.
-
-As soon as both are set, the backlog sync starts automatically. Run
-`/setsource`/`/setdest` again any time to repoint the mirror - the old
-backlog scan is cancelled and a new one starts for the new pair.
-
-If you'd rather configure it non-interactively (e.g. for a scripted first
-deploy), you can still set `SOURCE_CHAT_ID`/`DEST_CHAT_ID` in `.env`; they're
-only used once, to seed the database the first time the bot runs with no
-configuration saved yet. After that, `/setsource`/`/setdest` are always the
-source of truth and the env vars are ignored.
+If `SYNC_HISTORY_ON_START=true` the backlog of each new source is scanned
+automatically; with `false` only new media is mirrored and `/resync [source]`
+starts a history scan on demand. `SOURCE_CHAT_ID`/`DEST_CHAT_ID` in `.env` only
+seed an *empty* database once.
 
 ## Configuration
 
@@ -167,50 +152,51 @@ source of truth and the env vars are ignored.
 | --- | --- | --- |
 | `API_ID`, `API_HASH` | yes | Telegram app credentials |
 | `SESSION_STRING` | yes | User session from `scripts/generate_session.py` |
-| `BOT_TOKEN` | no | From @BotFather; gives control commands their own chat + "/" menu instead of Saved Messages |
-| `SOURCE_CHAT_ID` / `DEST_CHAT_ID` | no | One-time seed only; prefer `/chats` + `/setsource` + `/setdest` |
+| `BOT_TOKEN` | no | From @BotFather; gives the panel its own chat + command menu |
+| `SOURCE_CHAT_ID` / `DEST_CHAT_ID` | no | One-time seed for an empty DB only |
 | `MIN_DELAY_SECONDS` / `MAX_DELAY_SECONDS` | no | Randomized delay before each transfer (default `3`-`7`) |
-| `FLOOD_WAIT_MAX_RETRIES` | no | Max automatic retries on `FloodWait` before giving up on a message (default `5`) |
-| `MEDIA_TYPES` | no | Comma-separated subset of `photo,video,document,audio,voice,video_note,animation` |
-| `SYNC_HISTORY_ON_START` | no | Run the resumable backlog scan once a pair is configured (default `true`) |
+| `FLOOD_WAIT_MAX_RETRIES` | no | Automatic retries on `FloodWait` (default `5`) |
+| `MEDIA_TYPES` | no | Subset of `photo,video,document,audio,voice,video_note,animation` (applies to live/backlog; pasted links accept every type) |
+| `SYNC_HISTORY_ON_START` | no | Scan source history automatically (default `true`) |
+| `LARGE_FILE_MB` | no | Notice + Skip button for files at/above this size (default `500`; `0` = off; changeable with `/limit`) |
+| `TRANSFER_TIMEOUT_BASE_SECONDS` | no | Base time allowed per download/upload stage (default `120`); the limit grows with file size |
+| `TRANSFER_MIN_SPEED_KBPS` | no | Pessimistic speed used to scale the timeout by size (default `128`) |
+| `TRANSFER_STALL_SECONDS` | no | Give up on a transfer that moved no bytes for this long (default `120`) |
+| `TRANSFER_MAX_RETRIES` | no | Retries after a timeout/stall before skipping the file (default `2`) |
+| `PROGRESS_LOG_SECONDS` | no | How often progress is logged for long transfers (default `30`) |
+| `LIVE_REFRESH_SECONDS` | no | `/live` refresh interval (default `3`, minimum `1`) |
 | `DATABASE_URL`, `DATA_DIR`, `LOG_LEVEL` | no | Storage and logging |
 
 ## Commands
 
-Sent to your control bot (or from the userbot's own Saved Messages if you
-didn't set `BOT_TOKEN`):
+Everything below is owner-only and answers in Arabic. Names are English so they
+stay tappable; the menu in Telegram shows short Arabic descriptions.
 
-- `/chats [page]` - list your groups/channels as plain text, with numbers.
-- `/setsource [number|id|@username]` - tap a chat from the list to mirror
-  media from; or pass a number/id/@username directly.
-- `/setdest [number|id|@username]` - same, but only offers chats where
-  you're the owner or an admin (required to be able to post into them).
-- `/convert <t.me link>` - transfer a single photo/video/animation message
-  (from any chat this account is in) straight into the configured
-  destination, the same way the live mirror does. You can also just send
-  the link on its own, with no command. Works with public links
-  (`t.me/username/123`) and private-chat links (`t.me/c/1234567890/123`).
-- `/status` - shows the configured pair, backlog progress, pause state.
-- `/pause` - stops transferring media until `/resume`.
-- `/resume` - resumes transferring media.
-- `/resync` - resets the backlog cursor and rescans the full source history
-  from the newest message (safe: the dedup ledger prevents re-sending
-  anything already mirrored).
-- `/help` - lists these commands.
+**Sources** - `/addsource` (alias `/setsource`), `/sources`, `/removesource`, `/chats`  
+**Destination** - `/setdest`  
+**Sync** - `/resync [source]`, `/pause`, `/resume`  
+**Transfer** - paste any `t.me` link (or `/convert <link>`): `t.me/c/<id>/<msg>`,
+`t.me/c/<id>/<topic>/<msg>`, `t.me/<username>/<msg>`, with or without
+`?single` / `?comment=`; several links in one message are processed in order.
+Only the linked message is transferred; an already-archived file offers a
+"transfer anyway" button.  
+**Monitor** - `/live`, `/queue`, `/skip`, `/skipped`, `/limit [MB]` (`/limit auto <MB>`
+for automatic skipping above a size)  
+**Status** - `/panel` (buttons), `/status` (text), `/help`
+
+Without `BOT_TOKEN` the same commands work from Saved Messages only (inline
+buttons need the control bot).
 
 ## Staying within Telegram's limits
 
-- Only one media transfer is ever in flight at a time, spaced by a randomized
-  delay (`MIN_DELAY_SECONDS`-`MAX_DELAY_SECONDS`).
-- `FloodWait`/`SlowmodeWait` responses are honored automatically (sleep for
-  exactly what Telegram asks, plus a small buffer) and retried up to
-  `FLOOD_WAIT_MAX_RETRIES` times.
-- If Telegram signals the account is flood-restricted, banned, or
-  deactivated, the mirror stops immediately instead of retrying - check
-  `/status` for the reason.
-- Media is copied server-side (`copy_message`), which is both faster and
-  lighter than downloading and re-uploading files.
-- If you still see frequent `FloodWait` warnings in the logs, raise
+- Only one media transfer is ever in flight, spaced by a randomized delay.
+- `FloodWait`/`SlowmodeWait` are honored automatically and retried; the wait is
+  not counted against the per-file timeout.
+- A transfer that times out or stalls is retried (default twice) and then
+  skipped, so one bad file never blocks the queue; see `/skipped`.
+- If Telegram flags the account as restricted/banned, the mirror stops
+  immediately - check `/status` for the reason.
+- If you still see frequent `FloodWait` warnings, raise
   `MIN_DELAY_SECONDS`/`MAX_DELAY_SECONDS`.
 
 ## Keeping it running 24/7
@@ -252,6 +238,34 @@ To update to a new version of the code on the server:
 git pull
 docker compose up -d --build
 ```
+
+### Upgrading safely (database backup and rollback)
+
+The schema migration runs automatically at startup (and is idempotent), so back
+up the database **before** starting a new version, from the same volume the
+service uses:
+
+```bash
+docker compose stop mirror
+mkdir -p backup
+docker compose run --rm --no-deps -v "$PWD/backup:/backup" mirror python -c \
+  "import sqlite3; s=sqlite3.connect('data/telegram_mirror.db'); d=sqlite3.connect('/backup/telegram_mirror.pre-upgrade.db'); s.backup(d); d.close(); print('backup ok')"
+docker tag "$(docker compose images -q mirror)" telegram-archive-bot-mirror:rollback
+```
+
+**Rolling back:** an older image refuses to start against a newer schema
+(`Can't locate revision ...`), so first downgrade with the *new* image, then
+start the old one:
+
+```bash
+docker compose run --rm mirror alembic downgrade 0002_mirror_config
+docker tag telegram-archive-bot-mirror:rollback telegram-archive-bot-mirror:latest
+docker compose up -d --no-build mirror
+```
+
+(or restore `backup/telegram_mirror.pre-upgrade.db` into the volume - that loses
+anything archived after the upgrade). Sources beyond the first exist only in the
+new schema and are dropped by a downgrade.
 
 ### First deploy on a fresh server (private repo)
 
