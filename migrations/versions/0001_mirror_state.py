@@ -34,16 +34,10 @@ def upgrade() -> None:
         sa.Column("dest_chat_id", sa.String(length=255), nullable=False),
         sa.Column("dest_message_id", sa.BigInteger(), nullable=True),
         sa.Column("transferred_at", sa.DateTime(timezone=True), nullable=False),
-        sa.UniqueConstraint(
-            "dest_chat_id", "file_unique_id", name="uq_dest_file_unique_id"
-        ),
+        sa.UniqueConstraint("dest_chat_id", "file_unique_id", name="uq_dest_file_unique_id"),
     )
-    op.create_index(
-        "ix_transferred_media_file_unique_id", "transferred_media", ["file_unique_id"]
-    )
-    op.create_index(
-        "ix_transferred_media_dest_chat_id", "transferred_media", ["dest_chat_id"]
-    )
+    op.create_index("ix_transferred_media_file_unique_id", "transferred_media", ["file_unique_id"])
+    op.create_index("ix_transferred_media_dest_chat_id", "transferred_media", ["dest_chat_id"])
 
     op.create_table(
         "sync_state",
@@ -52,7 +46,9 @@ def upgrade() -> None:
         sa.Column("dest_chat_id", sa.String(length=255), nullable=False),
         sa.Column("status", sync_status, nullable=False),
         sa.Column("processed_messages", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("transferred_messages", sa.Integer(), nullable=False, server_default=sa.text("0")),
+        sa.Column(
+            "transferred_messages", sa.Integer(), nullable=False, server_default=sa.text("0")
+        ),
         sa.Column("duplicate_messages", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("resume_before_message_id", sa.BigInteger(), nullable=True),
         sa.Column("last_error", sa.Text(), nullable=True),
