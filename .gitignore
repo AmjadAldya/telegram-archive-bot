@@ -24,3 +24,8 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# env variants (e.g. .env.new, .env.old.bak)
+.env.*
+!.env.example
+.env.old.bak
