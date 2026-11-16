@@ -7,3 +7,8 @@ __pycache__
 *.pyc
 .venv
 data
+.mypy_cache
+.ruff_cache
+.pytest_cache
+htmlcov
+.coverage
