@@ -60,7 +60,7 @@ async def _seed_from_env_if_unset() -> None:
     try:
         source_chat = await bot.get_chat(SOURCE_CHAT_ID)
         dest_chat = await bot.get_chat(DEST_CHAT_ID)
-    except Exception:
+    except Exception:  # noqa: BLE001 - startup seed is best-effort; any failure falls back to /setsource
         logger.exception(
             "Could not resolve SOURCE_CHAT_ID/DEST_CHAT_ID from .env; skipping the seed. "
             "Use /chats, /setsource and /setdest instead."
@@ -91,7 +91,7 @@ async def _warm_peer_cache() -> None:
     populates the cache from real server data instead, the same way /chats
     does, so the configured source/dest chats resolve correctly afterwards.
     """
-    async for _ in bot.get_dialogs():
+    async for _ in bot.get_dialogs():  # type: ignore[union-attr]
         pass
 
 

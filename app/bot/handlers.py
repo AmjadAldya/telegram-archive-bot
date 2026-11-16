@@ -172,7 +172,7 @@ def register_control_commands(command_client, userbot_client, owner_filter) -> N
 
         try:
             source_message = await userbot_client.get_messages(link.chat_ref, link.message_id)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - report any lookup failure to the owner
             await message.reply(f"Could not fetch that message ({exc}).")
             return
 

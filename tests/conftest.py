@@ -19,6 +19,10 @@ os.environ.setdefault("DEST_CHAT_ID", "-1002222222222")
 os.environ.setdefault("MIN_DELAY_SECONDS", "0")
 os.environ.setdefault("MAX_DELAY_SECONDS", "0")
 os.environ.setdefault("SYNC_HISTORY_ON_START", "false")
+# Tests must not depend on a developer's local .env (python-dotenv never overrides
+# variables that are already set), so pin everything that influences behavior.
+os.environ["MEDIA_TYPES"] = "photo,video,document,audio,voice,video_note,animation"
+os.environ.pop("BOT_TOKEN", None)
 os.environ.setdefault("DATA_DIR", str(TEST_ROOT))
 os.environ["DATABASE_URL"] = f"sqlite:///{(TEST_ROOT / 'test.db').as_posix()}"
 

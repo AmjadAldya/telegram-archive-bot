@@ -25,5 +25,5 @@ async def handle_incoming_media(client, message) -> None:
         await transfer_message(client, message, pair.dest_chat_id)
     except AccountRestrictedError:
         logger.critical("Live mirror stopped: Telegram restricted this account")
-    except Exception:
+    except Exception:  # noqa: BLE001 - never let one message crash the update handler
         logger.exception("Failed to mirror message %s", message.id)

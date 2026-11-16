@@ -57,7 +57,7 @@ async def is_administered(client, chat_id: int) -> bool:
     the only chats media can actually be copied into."""
     try:
         member = await client.get_chat_member(chat_id, "me")
-    except Exception:
+    except Exception:  # noqa: BLE001 - any lookup failure means "not an admin"
         return False
     return member.status in _ADMIN_STATUSES
 

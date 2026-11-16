@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-import os
 
 from dotenv import load_dotenv
 

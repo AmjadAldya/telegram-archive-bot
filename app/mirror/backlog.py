@@ -109,7 +109,7 @@ async def sync_backlog(client) -> None:
                 raise
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception:  # noqa: BLE001 - one bad message must not stop the whole scan
                 logger.exception(
                     "Failed to transfer message %s, skipping it and continuing", message.id
                 )
@@ -136,7 +136,7 @@ async def sync_backlog(client) -> None:
     except asyncio.CancelledError:
         await asyncio.to_thread(_mark_status, state_id, SyncStatus.PAUSED)
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - top-level guard, recorded as FAILED
         await asyncio.to_thread(_mark_status, state_id, SyncStatus.FAILED, str(exc))
         logger.exception("Backlog sync failed for %s -> %s", source_chat_id, dest_chat_id)
 
