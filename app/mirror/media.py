@@ -11,6 +11,8 @@ _MEDIA_ATTRS = ("photo", "video", "document", "audio", "voice", "video_note", "a
 class MediaInfo:
     media_type: str
     file_unique_id: str
+    file_size: int | None = None
+    file_name: str | None = None  # display only: shown in /live, never logged or stored
 
 
 def extract_media_info(message) -> MediaInfo | None:
@@ -26,7 +28,14 @@ def extract_media_info(message) -> MediaInfo | None:
         file_unique_id = getattr(media_object, "file_unique_id", None)
         if not file_unique_id:
             continue
-        return MediaInfo(media_type=attr, file_unique_id=file_unique_id)
+        file_size = getattr(media_object, "file_size", None)
+        file_name = getattr(media_object, "file_name", None)
+        return MediaInfo(
+            media_type=attr,
+            file_unique_id=file_unique_id,
+            file_size=file_size if isinstance(file_size, int) else None,
+            file_name=file_name if isinstance(file_name, str) and file_name else None,
+        )
     return None
 
 

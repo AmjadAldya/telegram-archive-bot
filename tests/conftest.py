@@ -32,10 +32,20 @@ def reset_database() -> None:
     from alembic import command
 
     from app.database.base import Base, build_alembic_config, get_engine
-    from app.mirror import control, runtime
+    from app.mirror import control, limits, runtime, transfer
+    from app.mirror.jobs import errors, registry
 
     control.resume()
     asyncio.run(runtime.reset())
+    # Module-level asyncio primitives bind to the first loop that has to wait on
+    # them; every test runs in its own loop, so give each test fresh ones.
+    transfer._send_lock = asyncio.Lock()
+    transfer._GUARD_KWARGS.clear()
+    runtime._lock = asyncio.Lock()
+    registry.clear()
+    registry.on_large_file = None
+    errors.clear()
+    limits.reset()
 
     engine = get_engine()
     Base.metadata.drop_all(bind=engine)

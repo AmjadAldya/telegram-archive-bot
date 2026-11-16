@@ -89,7 +89,7 @@ def test_format_page_lists_all_chats() -> None:
 
 
 def test_format_page_reports_no_chats() -> None:
-    assert "No groups or channels" in format_page([], page=1)
+    assert "لا توجد مجموعات أو قنوات" in format_page([], page=1)
 
 
 def test_resolve_reference_by_index_from_last_listing() -> None:
