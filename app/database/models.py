@@ -4,7 +4,17 @@ import enum
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, DateTime, Enum, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Enum,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.base import Base
@@ -55,6 +65,7 @@ class TransferredMedia(Base):
     __tablename__ = "transferred_media"
     __table_args__ = (
         UniqueConstraint("dest_chat_id", "file_unique_id", name="uq_dest_file_unique_id"),
+        Index("ix_transferred_media_source_chat_id", "source_chat_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -121,3 +132,69 @@ class SyncState(Base):
         if self.last_error:
             line += f"\nlast_error: {self.last_error}"
         return line
+
+
+class SourceState(str, enum.Enum):
+    ACTIVE = "active"
+    ERROR = "error"
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class Source(Base):
+    """A chat the userbot mirrors media FROM. Many sources share one destination.
+
+    `enabled = False` is the "paused" state of a single source; `state` is a
+    health marker (the userbot could not read the chat -> ERROR). Per-source
+    backlog progress lives in `sync_state`, keyed by (source, destination).
+    """
+
+    __tablename__ = "sources"
+    __table_args__ = (UniqueConstraint("chat_id", name="uq_sources_chat_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    history_sync: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default=SourceState.ACTIVE.value)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
+class SkippedMedia(Base):
+    """Media that was not transferred (user skip, timeout, auto-skip).
+
+    These are NOT in the dedup ledger, so they can be retried later. Only
+    metadata is stored - never file names, captions or message text.
+    """
+
+    __tablename__ = "skipped_media"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_chat_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    source_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    file_unique_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    media_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BotSetting(Base):
+    """Tiny key/value store for runtime-adjustable settings (e.g. /limit)."""
+
+    __tablename__ = "bot_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )

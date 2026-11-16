@@ -57,7 +57,7 @@ async def is_administered(client, chat_id: int) -> bool:
     the only chats media can actually be copied into."""
     try:
         member = await client.get_chat_member(chat_id, "me")
-    except Exception:
+    except Exception:  # noqa: BLE001 - any lookup failure means "not an admin"
         return False
     return member.status in _ADMIN_STATUSES
 
@@ -77,20 +77,20 @@ def format_page(chats: list[ChatRef], page: int) -> str:
     _last_listing = {index: chat for index, chat in enumerate(chats, start=1)}
 
     if not chats:
-        return "No groups or channels found in this account's chat list."
+        return "لا توجد مجموعات أو قنوات في قائمة محادثات هذا الحساب."
 
     total_pages = max(1, ceil(len(chats) / PAGE_SIZE))
     page = max(1, min(page, total_pages))
     start = (page - 1) * PAGE_SIZE
 
-    lines = [f"Your groups/channels ({len(chats)} total) - page {page}/{total_pages}:"]
+    lines = [f"مجموعاتك وقنواتك ({len(chats)}) — صفحة {page}/{total_pages}:"]
     for index, chat in list(enumerate(chats, start=1))[start : start + PAGE_SIZE]:
-        handle = f"@{chat.username}" if chat.username else "no username"
+        handle = f"@{chat.username}" if chat.username else "بدون معرّف"
         lines.append(f"{index}. {chat.title} [{chat.kind}] {handle} id={chat.id}")
 
     if page < total_pages:
-        lines.append(f"\nMore: /chats {page + 1}")
-    lines.append("\nPick one with /setsource <number> or /setdest <number>.")
+        lines.append(f"\nالمزيد: /chats {page + 1}")
+    lines.append("\nاختر بالرقم: /addsource <رقم> أو /setdest <رقم>.")
     return "\n".join(lines)
 
 
@@ -102,7 +102,7 @@ async def resolve_reference(client, ref: str) -> tuple[int, str]:
     """
     ref = ref.strip()
     if not ref:
-        raise ChatReferenceError("Provide a number from /chats, a chat id, or a @username.")
+        raise ChatReferenceError("أرسل رقمًا من /chats أو معرّف المحادثة أو @username.")
 
     if ref.isdigit() and int(ref) in _last_listing:
         entry = _last_listing[int(ref)]
@@ -113,7 +113,7 @@ async def resolve_reference(client, ref: str) -> tuple[int, str]:
         chat = await client.get_chat(identifier)
     except Exception as exc:
         raise ChatReferenceError(
-            f"Could not find that chat ({exc}). Run /chats to list your groups/channels first."
+            f"تعذّر العثور على هذه المحادثة ({type(exc).__name__}). استخدم /chats لعرض مجموعاتك وقنواتك أولًا."
         ) from exc
     return chat.id, chat.title or str(chat.id)
 
@@ -143,13 +143,13 @@ def build_chat_keyboard(chats: list[ChatRef], role: str, page: int) -> InlineKey
 
     nav_row = []
     if page > 1:
-        nav_row.append(InlineKeyboardButton("◀ Prev", callback_data=f"pg:{role}:{page - 1}"))
+        nav_row.append(InlineKeyboardButton("◀ السابق", callback_data=f"pg:{role}:{page - 1}"))
     if page < total_pages:
-        nav_row.append(InlineKeyboardButton("Next ▶", callback_data=f"pg:{role}:{page + 1}"))
+        nav_row.append(InlineKeyboardButton("التالي ▶", callback_data=f"pg:{role}:{page + 1}"))
     if nav_row:
         rows.append(nav_row)
 
-    rows.append([InlineKeyboardButton("❌ Cancel", callback_data=f"cancel:{role}")])
+    rows.append([InlineKeyboardButton("❌ إلغاء", callback_data=f"cancel:{role}")])
 
     return InlineKeyboardMarkup(rows)
 

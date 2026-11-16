@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Any, Awaitable, Callable, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 from pyrogram.errors import (
     AuthKeyUnregistered,
@@ -52,6 +53,7 @@ async def call_with_flood_wait(
     func: Callable[..., Awaitable[T]],
     *args: Any,
     max_retries: int = FLOOD_WAIT_MAX_RETRIES,
+    on_wait: Callable[[float], None] | None = None,
     **kwargs: Any,
 ) -> T:
     """Call a Pyrogram coroutine, retrying on FloodWait and surfacing hard bans.
@@ -60,6 +62,9 @@ async def call_with_flood_wait(
     (plus a small safety buffer) instead of guessing. PeerFlood/deactivation
     errors mean the account is already restricted, so we stop immediately
     rather than hammering Telegram further.
+
+    `on_wait`, if given, is told how long each FloodWait sleep will last so a
+    watchdog can avoid mistaking the wait for a stalled transfer.
     """
     attempt = 0
     while True:
@@ -71,6 +76,8 @@ async def call_with_flood_wait(
                 logger.error("Giving up after %d FloodWait retries", max_retries)
                 raise
             wait_seconds = exc.value + random.uniform(1, 3)
+            if on_wait is not None:
+                on_wait(wait_seconds)
             logger.warning(
                 "FloodWait: sleeping %.1fs (attempt %d/%d)",
                 wait_seconds,
