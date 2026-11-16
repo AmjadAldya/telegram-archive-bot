@@ -11,13 +11,12 @@ dependencies = [
     "pyrogram>=2.0,<3.0",
     "python-dotenv>=1.0",
     "SQLAlchemy>=2.0,<3.0",
-]
-
-[project.optional-dependencies]
-speedups = [
+    # C extension that makes Pyrogram's MTProto encryption ~orders of magnitude faster.
+    # Without it Pyrogram falls back to pure Python and pins a CPU core on large transfers.
     "tgcrypto>=1.2",
 ]
 
+[project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
